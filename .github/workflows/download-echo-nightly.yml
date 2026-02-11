@@ -231,3 +231,9 @@ jobs:
           echo "### 🔗 Quick Links" >> $GITHUB_STEP_SUMMARY
           echo "- [Latest Release](https://github.com/${{ github.repository }}/releases/latest)" >> $GITHUB_STEP_SUMMARY
           echo "- [All Releases](https://github.com/${{ github.repository }}/releases)" >> $GITHUB_STEP_SUMMARY
+
+      - name: Generate changelog
+        run: |
+          # Confronta con l'ultima release e genera un changelog
+          gh api repos/brahmkshatriya/echo/compare/${{ env.LAST_COMMIT_SHA }}...${{ env.COMMIT_SHA }} \
+          --jq '.commits[] | "- \(.commit.message)"' > CHANGELOG.md
