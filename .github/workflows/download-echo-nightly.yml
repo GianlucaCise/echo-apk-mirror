@@ -1,4 +1,4 @@
-name: Download Echo APK from Nightly
+name: Download Echo APK and Create Release
 
 on:
   workflow_dispatch:
@@ -6,8 +6,10 @@ on:
     - cron: '0 0 * * *'
 
 jobs:
-  download:
+  download_and_release:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Download ed estrai
         run: |
@@ -15,17 +17,26 @@ jobs:
           unzip -q echo-artifact.zip
           APK=$(find . -name "*.apk" -type f | head -n 1)
           
-          # Crea il nome con la data (formato: giorno-mese-anno)
-          DATE=$(date +%d-%m-%Y)
+          # Formato: 11-02-2026_18-30
+          DATE=$(date +%d-%m-%Y_%H-%M)
+          echo "RELEASE_TAG=$DATE" >> $GITHUB_ENV
+          
           cp "$APK" "echo-${DATE}.apk"
-          
-          # Crea anche una copia "latest"
           cp "$APK" echo-latest.apk
-          
-          ls -lh echo-*.apk
-      
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
         with:
-          name: echo-apk
-          path: echo-*.apk
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: Release ${{ env.RELEASE_TAG }}
+          body: |
+            ### 📦 Echo Nightly Build
+            - **Data caricamento:** ${{ env.RELEASE_TAG }}
+            - **Sorgente:** [Nightly Link](https://nightly.link/brahmkshatriya/echo/workflows/nightly/main/artifact.zip)
+            
+            L'APK `echo-latest.apk` punta sempre all'ultima versione caricata in questa release.
+          draft: false
+          prerelease: false
+          files: |
+            echo-${{ env.RELEASE_TAG }}.apk
+            echo-latest.apk
