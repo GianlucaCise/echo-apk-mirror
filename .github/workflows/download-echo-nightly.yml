@@ -24,16 +24,25 @@ jobs:
           cp "$APK" "echo-${DATE}.apk"
           cp "$APK" echo-latest.apk
 
+#      - name: Upload APK as Artifact
+#        uses: actions/upload-artifact@v4
+#        with:
+#          name: echo-apk-${{ env.RELEASE_TAG }}
+#          path: echo-*.apk
+#          retention-days: 7 # Opzionale: elimina l'artifact dopo 7 giorni per risparmiare spazio
+          
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.RELEASE_TAG }}
-          name: Release ${{ env.RELEASE_TAG }}
+          name: Echo ${{ env.RELEASE_TAG }}
           body: |
             ### 📦 Echo Nightly Build
             - **Data caricamento:** ${{ env.RELEASE_TAG }}
             - **Sorgente:** [Nightly Link](https://nightly.link/brahmkshatriya/echo/workflows/nightly/main/artifact.zip)
-            
+
+            *This repository is not affiliated with Echo*
             L'APK `echo-latest.apk` punta sempre all'ultima versione caricata in questa release.
           draft: false
           prerelease: false
