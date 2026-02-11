@@ -129,10 +129,8 @@ jobs:
       
       - name: Create checksums file
         run: |
-          cat > CHECKSUMS.txt << EOF
-MD5: ${{ env.MD5_HASH }}
-SHA256: ${{ env.SHA256_HASH }}
-EOF
+          echo "MD5: ${{ env.MD5_HASH }}" > CHECKSUMS.txt
+          echo "SHA256: ${{ env.SHA256_HASH }}" >> CHECKSUMS.txt
           cat CHECKSUMS.txt
       
       - name: Create Release
@@ -187,37 +185,37 @@ EOF
           echo "⏭️ Saltata creazione release: L'APK non è cambiato rispetto all'ultima versione"
           echo "ℹ️ Per forzare la creazione di una release, esegui manualmente il workflow"
       
-#      - name: Clean up old releases (keep last 10)
-#        if: steps.check_change.outputs.changed != 'false'
-#        continue-on-error: true
-#        run: |
-#          echo "🧹 Pulizia release vecchie..."
-#          
-#          # Ottieni tutte le release
-#          RELEASES=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-#            https://api.github.com/repos/${{ github.repository }}/releases)
-#          
-#          # Conta le release
-#          RELEASE_COUNT=$(echo "$RELEASES" | jq '. | length')
-#          echo "📊 Release totali: ${RELEASE_COUNT}"
-#          
-#          # Se ci sono più di 10 release, elimina le più vecchie
-#          if [ "$RELEASE_COUNT" -gt 10 ]; then
-#            echo "🗑️ Eliminazione delle release più vecchie (mantengo le ultime 10)..."
-#            
-#            # Ottieni gli ID delle release da eliminare (dalla 11 in poi)
-#            DELETE_IDS=$(echo "$RELEASES" | jq -r '.[10:] | .[].id')
-#            
-#            for ID in $DELETE_IDS; do
-#              echo "Eliminazione release ID: $ID"
-#              curl -X DELETE -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-#                https://api.github.com/repos/${{ github.repository }}/releases/$ID
-#            done
-#            
-#            echo "✅ Pulizia completata"
-#          else
-#            echo "✅ Nessuna pulizia necessaria (release: ${RELEASE_COUNT}/10)"
-#          fi
+      - name: Clean up old releases (keep last 10)
+        if: steps.check_change.outputs.changed != 'false'
+        continue-on-error: true
+        run: |
+          echo "🧹 Pulizia release vecchie..."
+          
+          # Ottieni tutte le release
+          RELEASES=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            https://api.github.com/repos/${{ github.repository }}/releases)
+          
+          # Conta le release
+          RELEASE_COUNT=$(echo "$RELEASES" | jq '. | length')
+          echo "📊 Release totali: ${RELEASE_COUNT}"
+          
+          # Se ci sono più di 10 release, elimina le più vecchie
+          if [ "$RELEASE_COUNT" -gt 50 ]; then
+            echo "🗑️ Eliminazione delle release più vecchie (mantengo le ultime 10)..."
+            
+            # Ottieni gli ID delle release da eliminare (dalla 11 in poi)
+            DELETE_IDS=$(echo "$RELEASES" | jq -r '.[50:] | .[].id')
+            
+            for ID in $DELETE_IDS; do
+              echo "Eliminazione release ID: $ID"
+              curl -X DELETE -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+                https://api.github.com/repos/${{ github.repository }}/releases/$ID
+            done
+            
+            echo "✅ Pulizia completata"
+          else
+            echo "✅ Nessuna pulizia necessaria (release: ${RELEASE_COUNT}/10)"
+          fi
       
       - name: Summary
         if: always()
