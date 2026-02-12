@@ -1,0 +1,391 @@
+name: Download Echo APK with Version (Graph)
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 0 * * *'
+
+jobs:
+  # Job 1: Download APK
+  download_apk:
+    name: 📥 Download APK
+    runs-on: ubuntu-latest
+    outputs:
+      apk_downloaded: ${{ steps.download.outputs.success }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Install aapt
+        run: |
+          echo "📦 Installing aapt..."
+          sudo apt-get update -qq
+          sudo apt-get install -y aapt
+          aapt version
+      
+      - name: Download ed estrai APK
+        id: download
+        run: |
+          echo "📥 Downloading Echo APK from nightly.link..."
+          
+          curl -L -o echo-artifact.zip https://nightly.link/brahmkshatriya/echo/workflows/nightly/main/artifact.zip
+          
+          if [ ! -f echo-artifact.zip ]; then
+            echo "❌ Errore: Download fallito"
+            exit 1
+          fi
+          
+          FILE_SIZE=$(stat -c%s echo-artifact.zip 2>/dev/null || stat -f%z echo-artifact.zip 2>/dev/null)
+          echo "Downloaded ${FILE_SIZE} bytes"
+          
+          if [ "$FILE_SIZE" -lt 1000 ]; then
+            echo "❌ Errore: File troppo piccolo"
+            exit 1
+          fi
+          
+          unzip -q echo-artifact.zip
+          APK=$(find . -name "*.apk" -type f | head -n 1)
+          
+          if [ -z "$APK" ]; then
+            echo "❌ Errore: Nessun APK trovato"
+            exit 1
+          fi
+          
+          echo "✅ APK trovato: ${APK}"
+          cp "$APK" echo-temp.apk
+          echo "success=true" >> $GITHUB_OUTPUT
+      
+      - name: Upload APK temporaneo
+        uses: actions/upload-artifact@v4
+        with:
+          name: apk-temp
+          path: echo-temp.apk
+          retention-days: 1
+  
+  # Job 2: Estrai info APK (dipende da download)
+  extract_info:
+    name: 🔍 Extract APK Info
+    runs-on: ubuntu-latest
+    needs: download_apk
+    outputs:
+      version_name: ${{ steps.apk_info.outputs.version_name }}
+      version_code: ${{ steps.apk_info.outputs.version_code }}
+      package_name: ${{ steps.apk_info.outputs.package_name }}
+      min_sdk: ${{ steps.apk_info.outputs.min_sdk }}
+      target_sdk: ${{ steps.apk_info.outputs.target_sdk }}
+      release_tag: ${{ steps.apk_info.outputs.release_tag }}
+      release_name: ${{ steps.apk_info.outputs.release_name }}
+    
+    steps:
+      - name: Install aapt
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y aapt
+      
+      - name: Download APK artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: apk-temp
+      
+      - name: Estrai informazioni versione
+        id: apk_info
+        run: |
+          echo "🔍 Estraendo informazioni dall'APK..."
+          
+          APK_INFO=$(aapt dump badging echo-temp.apk)
+          
+          VERSION_NAME=$(echo "$APK_INFO" | grep "versionName" | sed -n "s/.*versionName='\([^']*\)'.*/\1/p")
+          VERSION_CODE=$(echo "$APK_INFO" | grep "versionCode" | sed -n "s/.*versionCode='\([^']*\)'.*/\1/p")
+          PACKAGE_NAME=$(echo "$APK_INFO" | grep "package:" | sed -n "s/.*name='\([^']*\)'.*/\1/p")
+          MIN_SDK=$(echo "$APK_INFO" | grep "sdkVersion" | sed -n "s/.*sdkVersion:'\([^']*\)'.*/\1/p")
+          TARGET_SDK=$(echo "$APK_INFO" | grep "targetSdkVersion" | sed -n "s/.*targetSdkVersion:'\([^']*\)'.*/\1/p")
+          
+          echo "📱 Informazioni APK:"
+          echo "  - Version Name: ${VERSION_NAME}"
+          echo "  - Version Code: ${VERSION_CODE}"
+          echo "  - Package: ${PACKAGE_NAME}"
+          echo "  - Min SDK: ${MIN_SDK}"
+          echo "  - Target SDK: ${TARGET_SDK}"
+          
+          echo "version_name=${VERSION_NAME}" >> $GITHUB_OUTPUT
+          echo "version_code=${VERSION_CODE}" >> $GITHUB_OUTPUT
+          echo "package_name=${PACKAGE_NAME}" >> $GITHUB_OUTPUT
+          echo "min_sdk=${MIN_SDK}" >> $GITHUB_OUTPUT
+          echo "target_sdk=${TARGET_SDK}" >> $GITHUB_OUTPUT
+          
+          DATE=$(date +%d-%m-%Y_%H-%M)
+          
+          if [ -n "$VERSION_NAME" ]; then
+            RELEASE_TAG="v${VERSION_NAME}"
+            echo "release_tag=${RELEASE_TAG}" >> $GITHUB_OUTPUT
+            echo "release_name=Echo ${VERSION_NAME}" >> $GITHUB_OUTPUT
+          else
+            RELEASE_TAG="${DATE}"
+            echo "release_tag=${RELEASE_TAG}" >> $GITHUB_OUTPUT
+            echo "release_name=Echo Build ${DATE}" >> $GITHUB_OUTPUT
+          fi
+          
+          echo "🏷️ Release tag: ${RELEASE_TAG}"
+  
+  # Job 3: Calcola checksums (parallelo a extract_info)
+  calculate_checksums:
+    name: 🔐 Calculate Checksums
+    runs-on: ubuntu-latest
+    needs: download_apk
+    outputs:
+      apk_size_mb: ${{ steps.checksums.outputs.apk_size_mb }}
+      md5_hash: ${{ steps.checksums.outputs.md5_hash }}
+      sha256_hash: ${{ steps.checksums.outputs.sha256_hash }}
+    
+    steps:
+      - name: Download APK artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: apk-temp
+      
+      - name: Calcola checksums
+        id: checksums
+        run: |
+          APK_SIZE=$(stat -c%s echo-temp.apk 2>/dev/null || stat -f%z echo-temp.apk 2>/dev/null)
+          APK_SIZE_MB=$(awk "BEGIN {printf \"%.2f\", $APK_SIZE / 1024 / 1024}")
+          echo "apk_size_mb=${APK_SIZE_MB}" >> $GITHUB_OUTPUT
+          
+          MD5_HASH=$(md5sum echo-temp.apk | cut -d' ' -f1)
+          SHA256_HASH=$(sha256sum echo-temp.apk | cut -d' ' -f1)
+          echo "md5_hash=${MD5_HASH}" >> $GITHUB_OUTPUT
+          echo "sha256_hash=${SHA256_HASH}" >> $GITHUB_OUTPUT
+          
+          echo "📊 Checksums:"
+          echo "  MD5: ${MD5_HASH}"
+          echo "  SHA256: ${SHA256_HASH}"
+          echo "  Size: ${APK_SIZE_MB} MB"
+  
+  # Job 4: Get Echo info (parallelo agli altri)
+  fetch_echo_info:
+    name: 📝 Fetch Echo Info
+    runs-on: ubuntu-latest
+    outputs:
+      echo_stars: ${{ steps.echo_info.outputs.echo_stars }}
+      echo_desc: ${{ steps.echo_info.outputs.echo_desc }}
+      commit_msg: ${{ steps.echo_info.outputs.commit_msg }}
+      commit_sha: ${{ steps.echo_info.outputs.commit_sha }}
+      commit_date: ${{ steps.echo_info.outputs.commit_date }}
+    
+    steps:
+      - name: Get Echo repository info
+        id: echo_info
+        continue-on-error: true
+        run: |
+          ECHO_INFO=$(curl -s https://api.github.com/repos/brahmkshatriya/echo)
+          ECHO_STARS=$(echo "$ECHO_INFO" | jq -r '.stargazers_count')
+          ECHO_DESC=$(echo "$ECHO_INFO" | jq -r '.description')
+          
+          echo "echo_stars=${ECHO_STARS}" >> $GITHUB_OUTPUT
+          echo "echo_desc=${ECHO_DESC}" >> $GITHUB_OUTPUT
+          
+          LAST_COMMIT=$(curl -s https://api.github.com/repos/brahmkshatriya/echo/commits/main)
+          COMMIT_MSG=$(echo "$LAST_COMMIT" | jq -r '.commit.message' | head -n 1)
+          COMMIT_SHA=$(echo "$LAST_COMMIT" | jq -r '.sha' | cut -c1-7)
+          COMMIT_DATE=$(echo "$LAST_COMMIT" | jq -r '.commit.author.date')
+          
+          echo "commit_msg=${COMMIT_MSG}" >> $GITHUB_OUTPUT
+          echo "commit_sha=${COMMIT_SHA}" >> $GITHUB_OUTPUT
+          echo "commit_date=${COMMIT_DATE}" >> $GITHUB_OUTPUT
+  
+  # Job 5: Check versione esistente (dipende da extract_info)
+  check_version:
+    name: ✅ Check Version
+    runs-on: ubuntu-latest
+    needs: extract_info
+    outputs:
+      exists: ${{ steps.check_existing.outputs.exists }}
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Check if version already released
+        id: check_existing
+        continue-on-error: true
+        run: |
+          TAG="${{ needs.extract_info.outputs.release_tag }}"
+          
+          if git ls-remote --tags origin | grep -q "refs/tags/${TAG}"; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "⚠️ Release ${TAG} già esistente"
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "✅ Nuova versione: ${TAG}"
+          fi
+  
+  # Job 6: Prepara file (dipende da info e checksums)
+  prepare_files:
+    name: 📄 Prepare Files
+    runs-on: ubuntu-latest
+    needs: [extract_info, calculate_checksums, fetch_echo_info]
+    
+    steps:
+      - name: Download APK artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: apk-temp
+      
+      - name: Rinomina APK con versione
+        run: |
+          VERSION="${{ needs.extract_info.outputs.version_name }}"
+          
+          if [ -n "$VERSION" ]; then
+            cp echo-temp.apk "echo-${VERSION}.apk"
+            echo "✅ APK rinominato in: echo-${VERSION}.apk"
+          else
+            DATE=$(date +%d-%m-%Y_%H-%M)
+            cp echo-temp.apk "echo-${DATE}.apk"
+            echo "✅ APK rinominato in: echo-${DATE}.apk"
+          fi
+          
+          cp echo-temp.apk echo-latest.apk
+          ls -lh echo-*.apk
+      
+      - name: Create version info file
+        run: |
+          {
+            echo "Echo APK Version Information"
+            echo "============================"
+            echo ""
+            echo "Version Name: ${{ needs.extract_info.outputs.version_name }}"
+            echo "Version Code: ${{ needs.extract_info.outputs.version_code }}"
+            echo "Package Name: ${{ needs.extract_info.outputs.package_name }}"
+            echo ""
+            echo "Android Requirements:"
+            echo "- Minimum SDK: ${{ needs.extract_info.outputs.min_sdk }}"
+            echo "- Target SDK: ${{ needs.extract_info.outputs.target_sdk }}"
+            echo ""
+            echo "File Information:"
+            echo "- Size: ${{ needs.calculate_checksums.outputs.apk_size_mb }} MB"
+            echo "- MD5: ${{ needs.calculate_checksums.outputs.md5_hash }}"
+            echo "- SHA256: ${{ needs.calculate_checksums.outputs.sha256_hash }}"
+            echo ""
+            echo "Build Information:"
+            echo "- Download Date: $(date -u +"%Y-%m-%d %H:%M:%S UTC")"
+            echo "- Echo Commit: ${{ needs.fetch_echo_info.outputs.commit_sha }}"
+            echo "- Commit Message: ${{ needs.fetch_echo_info.outputs.commit_msg }}"
+          } > VERSION_INFO.txt
+          
+          cat VERSION_INFO.txt
+      
+      - name: Upload final files
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-files
+          path: |
+            echo-${{ needs.extract_info.outputs.version_name }}.apk
+            echo-latest.apk
+            VERSION_INFO.txt
+          retention-days: 1
+  
+  # Job 7: Crea release (dipende da tutto)
+  create_release:
+    name: 🚀 Create Release
+    runs-on: ubuntu-latest
+    needs: [extract_info, calculate_checksums, fetch_echo_info, check_version, prepare_files]
+    if: needs.check_version.outputs.exists != 'true'
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Download release files
+        uses: actions/download-artifact@v4
+        with:
+          name: release-files
+      
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.extract_info.outputs.release_tag }}
+          name: ${{ needs.extract_info.outputs.release_name }}
+          body: |
+            ## 📦 Echo APK - Version ${{ needs.extract_info.outputs.version_name }}
+            
+            > **Note**: This repository is not affiliated with the official Echo project.
+            
+            ### 📱 APK Information
+            - **Version Name:** `${{ needs.extract_info.outputs.version_name }}`
+            - **Version Code:** `${{ needs.extract_info.outputs.version_code }}`
+            - **Package Name:** `${{ needs.extract_info.outputs.package_name }}`
+            - **Size:** ${{ needs.calculate_checksums.outputs.apk_size_mb }} MB
+            
+            ### 📋 Android Requirements
+            - **Minimum SDK:** API ${{ needs.extract_info.outputs.min_sdk }}
+            - **Target SDK:** API ${{ needs.extract_info.outputs.target_sdk }}
+            
+            ### 🔐 Checksums
+            ```
+            MD5:    ${{ needs.calculate_checksums.outputs.md5_hash }}
+            SHA256: ${{ needs.calculate_checksums.outputs.sha256_hash }}
+            ```
+            
+            ### 📝 Latest Echo Commit
+            - **Commit:** [`${{ needs.fetch_echo_info.outputs.commit_sha }}`](https://github.com/brahmkshatriya/echo/commit/${{ needs.fetch_echo_info.outputs.commit_sha }})
+            - **Message:** ${{ needs.fetch_echo_info.outputs.commit_msg }}
+            - **Date:** ${{ needs.fetch_echo_info.outputs.commit_date }}
+            
+            ### 🔗 Links
+            - 🌟 [Echo Repository](https://github.com/brahmkshatriya/echo) (${{ needs.fetch_echo_info.outputs.echo_stars }} stars)
+            - 📥 [Nightly Link Source](https://nightly.link/brahmkshatriya/echo/workflows/nightly/main/artifact.zip)
+            
+            ### 📄 Files
+            - `echo-${{ needs.extract_info.outputs.version_name }}.apk` - Main APK file
+            - `echo-latest.apk` - Symlink to the latest version
+            - `VERSION_INFO.txt` - Detailed version information
+            
+            ---
+            
+            **Description:** ${{ needs.fetch_echo_info.outputs.echo_desc }}
+          draft: false
+          prerelease: false
+          files: |
+            echo-${{ needs.extract_info.outputs.version_name }}.apk
+            echo-latest.apk
+            VERSION_INFO.txt
+  
+  # Job 8: Skip notification (se già esiste)
+  skip_notification:
+    name: ⏭️ Skip Notification
+    runs-on: ubuntu-latest
+    needs: [extract_info, check_version]
+    if: needs.check_version.outputs.exists == 'true'
+    
+    steps:
+      - name: Skip release
+        run: |
+          echo "⏭️ Release ${{ needs.extract_info.outputs.release_tag }} già esistente"
+          echo "ℹ️ Nessuna nuova release creata"
+  
+  # Job 9: Summary finale (sempre, dipende da tutti)
+  summary:
+    name: 📊 Summary
+    runs-on: ubuntu-latest
+    needs: [extract_info, calculate_checksums, check_version, create_release, skip_notification]
+    if: always()
+    
+    steps:
+      - name: Generate Summary
+        run: |
+          echo "## 📊 Workflow Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📱 APK Information" >> $GITHUB_STEP_SUMMARY
+          echo "- **Version:** ${{ needs.extract_info.outputs.version_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Version Code:** ${{ needs.extract_info.outputs.version_code }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Package:** ${{ needs.extract_info.outputs.package_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Size:** ${{ needs.calculate_checksums.outputs.apk_size_mb }} MB" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🏷️ Release" >> $GITHUB_STEP_SUMMARY
+          echo "- **Tag:** ${{ needs.extract_info.outputs.release_tag }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Already Exists:** ${{ needs.check_version.outputs.exists }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🔗 Quick Links" >> $GITHUB_STEP_SUMMARY
+          echo "- [Latest Release](https://github.com/${{ github.repository }}/releases/latest)" >> $GITHUB_STEP_SUMMARY
+          echo "- [All Releases](https://github.com/${{ github.repository }}/releases)" >> $GITHUB_STEP_SUMMARY
