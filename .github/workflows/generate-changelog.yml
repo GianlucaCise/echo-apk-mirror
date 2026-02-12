@@ -54,43 +54,43 @@ jobs:
       
       - name: Generate changelog
         run: |
-          cat > CHANGELOG.md << 'ENDMARKER'
-          # 📋 Changelog
-          
-          ## ${{ steps.release.outputs.current }}
-          
-          **Release Date:** $(date -u +"%Y-%m-%d")
-          
-          ### 🔗 Comparison
-          
-          ENDMARKER
+          {
+            echo "# 📋 Changelog"
+            echo ""
+            echo "## ${{ steps.release.outputs.current }}"
+            echo ""
+            echo "**Release Date:** $(date -u +"%Y-%m-%d")"
+            echo ""
+            echo "### 🔗 Comparison"
+            echo ""
+          } > CHANGELOG.md
           
           if [ -n "${{ steps.commits.outputs.commits }}" ]; then
-            cat >> CHANGELOG.md << 'ENDMARKER'
-          ### 📝 Changes in Echo
-          
-          ${{ steps.commits.outputs.commits }}
-          
-          [View full comparison](https://github.com/brahmkshatriya/echo/compare/${{ steps.commits.outputs.previous_commit }}...${{ steps.commits.outputs.current_commit }})
-          
-          ENDMARKER
+            {
+              echo "### 📝 Changes in Echo"
+              echo ""
+              echo "${{ steps.commits.outputs.commits }}"
+              echo ""
+              echo "[View full comparison](https://github.com/brahmkshatriya/echo/compare/${{ steps.commits.outputs.previous_commit }}...${{ steps.commits.outputs.current_commit }})"
+              echo ""
+            } >> CHANGELOG.md
           else
-            cat >> CHANGELOG.md << 'ENDMARKER'
-          No commit information available. This may be the first release or commit info could not be extracted.
-          
-          ENDMARKER
+            {
+              echo "No commit information available. This may be the first release or commit info could not be extracted."
+              echo ""
+            } >> CHANGELOG.md
           fi
           
-          cat >> CHANGELOG.md << 'ENDMARKER'
-          ### 📥 Downloads
-          
-          - [echo-${{ steps.release.outputs.current }}.apk](https://github.com/${{ github.repository }}/releases/download/${{ steps.release.outputs.current }}/echo-${{ steps.release.outputs.current }}.apk)
-          - [echo-latest.apk](https://github.com/${{ github.repository }}/releases/download/${{ steps.release.outputs.current }}/echo-latest.apk)
-          
-          ---
-          
-          *Automatically generated changelog*
-          ENDMARKER
+          {
+            echo "### 📥 Downloads"
+            echo ""
+            echo "- [echo-${{ steps.release.outputs.current }}.apk](https://github.com/${{ github.repository }}/releases/download/${{ steps.release.outputs.current }}/echo-${{ steps.release.outputs.current }}.apk)"
+            echo "- [echo-latest.apk](https://github.com/${{ github.repository }}/releases/download/${{ steps.release.outputs.current }}/echo-latest.apk)"
+            echo ""
+            echo "---"
+            echo ""
+            echo "*Automatically generated changelog*"
+          } >> CHANGELOG.md
           
           cat CHANGELOG.md
       
