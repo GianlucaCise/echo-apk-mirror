@@ -3,7 +3,7 @@ name: Download Echo APK with Version
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 0 * * 1'
+    - cron: '0 0 * * *'
 
 jobs:
   download_and_release:
