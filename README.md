@@ -88,6 +88,10 @@ If you find Echo useful, consider:
 
 This repository follows the same license as the original Echo project.
 
+## Takedown
+
+If you are the copyright holder and want this mirror removed, please open an issue.
+
 ## 🔗 Links
 
 - [Echo GitHub Repository](https://github.com/brahmkshatriya/echo)
