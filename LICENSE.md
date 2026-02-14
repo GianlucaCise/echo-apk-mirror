@@ -23,4 +23,4 @@ SOFTWARE.
 ---
 
 **Note:** This license applies ONLY to the automation code (GitHub Actions workflows)
-in this repository. The Echo APK itself is licensed separately - see LICENSE-ECHO.
+in this repository. The Echo APK itself is licensed separately. See [LICENSE-ECHO.md](https://github.com/GianlucaCise/echo-zip-extractor/blob/main/LICENSE-ECHO.md).
