@@ -13,8 +13,7 @@ This repository is an **automated mirror** of Echo APK builds.
 - ❌ Modify the APK in any way
 - ❌ Claim ownership of Echo
 - ❌ Provide support for Echo
-- ❌ Guarantee availability or quality
-
+  
 ## Official Echo Project
 
 For official support, bug reports, and contributions:
@@ -28,6 +27,17 @@ If you have security concerns about the APKs:
 1. Verify checksums (provided in each release)
 2. Download directly from nightly.link
 3. Build from source at the official repository
+
+## License
+
+Echo is distributed under UPL license.
+See: https://github.com/brahmkshatriya/echo/blob/main/LICENSE.md
+
+This mirror repository makes no additional claims and respects the original license.
+
+## Takedown
+
+If you are the copyright holder and want this mirror removed, please open an issue.
 
 ## Legal
 
