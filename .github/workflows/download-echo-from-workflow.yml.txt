@@ -1,0 +1,389 @@
+name: Download Echo APK from Workflow
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 0 * * *'
+
+jobs:
+  download_and_release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Install aapt
+        run: |
+          echo "📦 Installing aapt..."
+          sudo apt-get update -qq
+          sudo apt-get install -y aapt
+      
+      - name: Get latest successful nightly workflow run
+        id: get_run
+        run: |
+          echo "🔍 Looking for latest successful nightly workflow run..."
+          
+          # Ottieni l'ultima run del workflow "nightly" che ha successo
+          RUN_DATA=$(curl -s -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/brahmkshatriya/echo/actions/workflows/nightly.yml/runs?status=success&per_page=1")
+          
+          RUN_ID=$(echo "$RUN_DATA" | jq -r '.workflow_runs[0].id')
+          RUN_STATUS=$(echo "$RUN_DATA" | jq -r '.workflow_runs[0].status')
+          RUN_CONCLUSION=$(echo "$RUN_DATA" | jq -r '.workflow_runs[0].conclusion')
+          RUN_DATE=$(echo "$RUN_DATA" | jq -r '.workflow_runs[0].created_at')
+          
+          if [ "$RUN_ID" == "null" ] || [ -z "$RUN_ID" ]; then
+            echo "run_found=false" >> $GITHUB_OUTPUT
+            echo "⚠️ No successful workflow runs found"
+            exit 0
+          fi
+          
+          echo "run_found=true" >> $GITHUB_OUTPUT
+          echo "run_id=${RUN_ID}" >> $GITHUB_OUTPUT
+          echo "run_date=${RUN_DATE}" >> $GITHUB_OUTPUT
+          
+          echo "✅ Found workflow run: ${RUN_ID}"
+          echo "   Status: ${RUN_STATUS}"
+          echo "   Conclusion: ${RUN_CONCLUSION}"
+          echo "   Date: ${RUN_DATE}"
+      
+      - name: No workflow run available
+        if: steps.get_run.outputs.run_found != 'true'
+        run: |
+          echo "## ⚠️ No Workflow Runs Available" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "No successful 'nightly' workflow runs found in Echo repository." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "This could mean:" >> $GITHUB_STEP_SUMMARY
+          echo "- The nightly workflow hasn't run yet" >> $GITHUB_STEP_SUMMARY
+          echo "- Recent runs have failed" >> $GITHUB_STEP_SUMMARY
+          echo "- The workflow name has changed" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Next Steps" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ This workflow will retry automatically" >> $GITHUB_STEP_SUMMARY
+          echo "- 📦 [View latest release](https://github.com/${{ github.repository }}/releases/latest)" >> $GITHUB_STEP_SUMMARY
+      
+      - name: Get artifacts from workflow run
+        if: steps.get_run.outputs.run_found == 'true'
+        id: get_artifacts
+        run: |
+          RUN_ID="${{ steps.get_run.outputs.run_id }}"
+          
+          echo "📥 Getting artifacts from run ${RUN_ID}..."
+          
+          # Ottieni la lista degli artifacts
+          ARTIFACTS_DATA=$(curl -s -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/brahmkshatriya/echo/actions/runs/${RUN_ID}/artifacts")
+          
+          # Conta gli artifacts
+          ARTIFACT_COUNT=$(echo "$ARTIFACTS_DATA" | jq '.artifacts | length')
+          
+          if [ "$ARTIFACT_COUNT" == "0" ]; then
+            echo "artifacts_found=false" >> $GITHUB_OUTPUT
+            echo "⚠️ No artifacts found in workflow run"
+            exit 0
+          fi
+          
+          echo "✅ Found ${ARTIFACT_COUNT} artifact(s)"
+          
+          # Prendi il primo artifact (di solito ce n'è uno solo)
+          ARTIFACT_ID=$(echo "$ARTIFACTS_DATA" | jq -r '.artifacts[0].id')
+          ARTIFACT_NAME=$(echo "$ARTIFACTS_DATA" | jq -r '.artifacts[0].name')
+          ARTIFACT_SIZE=$(echo "$ARTIFACTS_DATA" | jq -r '.artifacts[0].size_in_bytes')
+          ARTIFACT_EXPIRED=$(echo "$ARTIFACTS_DATA" | jq -r '.artifacts[0].expired')
+          
+          echo "artifacts_found=true" >> $GITHUB_OUTPUT
+          echo "artifact_id=${ARTIFACT_ID}" >> $GITHUB_OUTPUT
+          echo "artifact_name=${ARTIFACT_NAME}" >> $GITHUB_OUTPUT
+          
+          echo "📦 Artifact details:"
+          echo "   ID: ${ARTIFACT_ID}"
+          echo "   Name: ${ARTIFACT_NAME}"
+          echo "   Size: ${ARTIFACT_SIZE} bytes"
+          echo "   Expired: ${ARTIFACT_EXPIRED}"
+          
+          if [ "$ARTIFACT_EXPIRED" == "true" ]; then
+            echo "artifacts_found=false" >> $GITHUB_OUTPUT
+            echo "⚠️ Artifact has expired"
+            exit 0
+          fi
+      
+      - name: No artifacts available
+        if: steps.get_run.outputs.run_found == 'true' && steps.get_artifacts.outputs.artifacts_found != 'true'
+        run: |
+          echo "## ⚠️ No Artifacts Available" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Workflow run found but no valid artifacts available." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "This could mean:" >> $GITHUB_STEP_SUMMARY
+          echo "- Artifacts have expired (GitHub keeps them for 90 days by default)" >> $GITHUB_STEP_SUMMARY
+          echo "- The workflow run didn't produce artifacts" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Next Steps" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Waiting for next successful workflow run" >> $GITHUB_STEP_SUMMARY
+          echo "- 📦 [View latest release](https://github.com/${{ github.repository }}/releases/latest)" >> $GITHUB_STEP_SUMMARY
+      
+      - name: Download artifact
+        if: steps.get_artifacts.outputs.artifacts_found == 'true'
+        id: download
+        run: |
+          ARTIFACT_ID="${{ steps.get_artifacts.outputs.artifact_id }}"
+          
+          echo "📥 Downloading artifact ${ARTIFACT_ID}..."
+          
+          # Scarica l'artifact (richiede autenticazione)
+          curl -L -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            -o echo-artifact.zip \
+            "https://api.github.com/repos/brahmkshatriya/echo/actions/artifacts/${ARTIFACT_ID}/zip"
+          
+          if [ ! -f echo-artifact.zip ]; then
+            echo "download_success=false" >> $GITHUB_OUTPUT
+            echo "❌ Download failed: file not created"
+            exit 0
+          fi
+          
+          FILE_SIZE=$(stat -c%s echo-artifact.zip 2>/dev/null || stat -f%z echo-artifact.zip 2>/dev/null)
+          
+          if [ "$FILE_SIZE" -lt 1000 ]; then
+            echo "download_success=false" >> $GITHUB_OUTPUT
+            echo "❌ Download failed: file too small (${FILE_SIZE} bytes)"
+            exit 0
+          fi
+          
+          echo "download_success=true" >> $GITHUB_OUTPUT
+          echo "✅ Download successful (${FILE_SIZE} bytes)"
+          
+          # Estrai l'artifact
+          unzip -q echo-artifact.zip
+          
+          # Trova l'APK
+          APK=$(find . -name "*.apk" -type f | head -n 1)
+          
+          if [ -z "$APK" ]; then
+            echo "download_success=false" >> $GITHUB_OUTPUT
+            echo "❌ No APK found in artifact"
+            echo "Contents:"
+            ls -la
+            exit 0
+          fi
+          
+          echo "✅ APK found: ${APK}"
+          cp "$APK" echo-temp.apk
+      
+      - name: Download failed summary
+        if: steps.get_artifacts.outputs.artifacts_found == 'true' && steps.download.outputs.download_success != 'true'
+        run: |
+          echo "## ❌ Download Failed" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Failed to download or extract APK from artifact." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "This workflow will retry automatically on the next schedule." >> $GITHUB_STEP_SUMMARY
+      
+      # Resto del workflow (uguale a prima, solo se download OK)
+      - name: Extract APK info
+        if: steps.download.outputs.download_success == 'true'
+        id: apk_info
+        run: |
+          echo "🔍 Extracting APK information..."
+          
+          APK_INFO=$(aapt dump badging echo-temp.apk)
+          
+          VERSION_NAME=$(echo "$APK_INFO" | grep "versionName" | sed -n "s/.*versionName='\([^']*\)'.*/\1/p")
+          VERSION_CODE=$(echo "$APK_INFO" | grep "versionCode" | sed -n "s/.*versionCode='\([^']*\)'.*/\1/p")
+          PACKAGE_NAME=$(echo "$APK_INFO" | grep "package:" | sed -n "s/.*name='\([^']*\)'.*/\1/p")
+          MIN_SDK=$(echo "$APK_INFO" | grep "sdkVersion" | sed -n "s/.*sdkVersion:'\([^']*\)'.*/\1/p")
+          TARGET_SDK=$(echo "$APK_INFO" | grep "targetSdkVersion" | sed -n "s/.*targetSdkVersion:'\([^']*\)'.*/\1/p")
+          
+          echo "version_name=${VERSION_NAME}" >> $GITHUB_OUTPUT
+          echo "version_code=${VERSION_CODE}" >> $GITHUB_OUTPUT
+          echo "package_name=${PACKAGE_NAME}" >> $GITHUB_OUTPUT
+          echo "min_sdk=${MIN_SDK}" >> $GITHUB_OUTPUT
+          echo "target_sdk=${TARGET_SDK}" >> $GITHUB_OUTPUT
+          
+          if [ -n "$VERSION_NAME" ]; then
+            RELEASE_TAG="v${VERSION_NAME}"
+            echo "release_tag=${RELEASE_TAG}" >> $GITHUB_OUTPUT
+            echo "release_name=Echo ${VERSION_NAME}" >> $GITHUB_OUTPUT
+          else
+            DATE=$(date +%d-%m-%Y_%H-%M)
+            RELEASE_TAG="${DATE}"
+            echo "release_tag=${RELEASE_TAG}" >> $GITHUB_OUTPUT
+            echo "release_name=Echo Build ${DATE}" >> $GITHUB_OUTPUT
+          fi
+          
+          echo "✅ Version: ${VERSION_NAME} (${VERSION_CODE})"
+      
+      - name: Rename APK
+        if: steps.download.outputs.download_success == 'true'
+        run: |
+          VERSION="${{ steps.apk_info.outputs.version_name }}"
+          
+          if [ -n "$VERSION" ]; then
+            cp echo-temp.apk "echo-${VERSION}.apk"
+          else
+            DATE=$(date +%d-%m-%Y_%H-%M)
+            cp echo-temp.apk "echo-${DATE}.apk"
+          fi
+          
+          cp echo-temp.apk echo-latest.apk
+          ls -lh echo-*.apk
+      
+      - name: Calculate checksums
+        if: steps.download.outputs.download_success == 'true'
+        id: checksums
+        run: |
+          APK_SIZE=$(stat -c%s echo-latest.apk 2>/dev/null || stat -f%z echo-latest.apk 2>/dev/null)
+          APK_SIZE_MB=$(awk "BEGIN {printf \"%.2f\", $APK_SIZE / 1024 / 1024}")
+          echo "apk_size_mb=${APK_SIZE_MB}" >> $GITHUB_OUTPUT
+          
+          MD5_HASH=$(md5sum echo-latest.apk | cut -d' ' -f1)
+          SHA256_HASH=$(sha256sum echo-latest.apk | cut -d' ' -f1)
+          echo "md5_hash=${MD5_HASH}" >> $GITHUB_OUTPUT
+          echo "sha256_hash=${SHA256_HASH}" >> $GITHUB_OUTPUT
+      
+      - name: Check if version exists
+        if: steps.download.outputs.download_success == 'true'
+        id: check_existing
+        continue-on-error: true
+        run: |
+          TAG="${{ steps.apk_info.outputs.release_tag }}"
+          
+          if git ls-remote --tags origin | grep -q "refs/tags/${TAG}"; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "⚠️ Release ${TAG} already exists"
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "✅ New version: ${TAG}"
+          fi
+      
+      - name: Get Echo info
+        if: steps.download.outputs.download_success == 'true'
+        id: echo_info
+        continue-on-error: true
+        run: |
+          ECHO_INFO=$(curl -s https://api.github.com/repos/brahmkshatriya/echo)
+          ECHO_STARS=$(echo "$ECHO_INFO" | jq -r '.stargazers_count')
+          ECHO_DESC=$(echo "$ECHO_INFO" | jq -r '.description')
+          
+          echo "echo_stars=${ECHO_STARS}" >> $GITHUB_OUTPUT
+          echo "echo_desc=${ECHO_DESC}" >> $GITHUB_OUTPUT
+          
+          LAST_COMMIT=$(curl -s https://api.github.com/repos/brahmkshatriya/echo/commits/main)
+          COMMIT_MSG=$(echo "$LAST_COMMIT" | jq -r '.commit.message' | head -n 1)
+          COMMIT_SHA=$(echo "$LAST_COMMIT" | jq -r '.sha' | cut -c1-7)
+          COMMIT_DATE=$(echo "$LAST_COMMIT" | jq -r '.commit.author.date')
+          
+          echo "commit_msg=${COMMIT_MSG}" >> $GITHUB_OUTPUT
+          echo "commit_sha=${COMMIT_SHA}" >> $GITHUB_OUTPUT
+          echo "commit_date=${COMMIT_DATE}" >> $GITHUB_OUTPUT
+      
+      - name: Create version info
+        if: steps.download.outputs.download_success == 'true'
+        run: |
+          {
+            echo "Echo APK Version Information"
+            echo "============================"
+            echo ""
+            echo "Version Name: ${{ steps.apk_info.outputs.version_name }}"
+            echo "Version Code: ${{ steps.apk_info.outputs.version_code }}"
+            echo "Package Name: ${{ steps.apk_info.outputs.package_name }}"
+            echo ""
+            echo "Android Requirements:"
+            echo "- Minimum SDK: ${{ steps.apk_info.outputs.min_sdk }}"
+            echo "- Target SDK: ${{ steps.apk_info.outputs.target_sdk }}"
+            echo ""
+            echo "File Information:"
+            echo "- Size: ${{ steps.checksums.outputs.apk_size_mb }} MB"
+            echo "- MD5: ${{ steps.checksums.outputs.md5_hash }}"
+            echo "- SHA256: ${{ steps.checksums.outputs.sha256_hash }}"
+            echo ""
+            echo "Build Information:"
+            echo "- Download Date: $(date -u +"%Y-%m-%d %H:%M:%S UTC")"
+            echo "- Echo Commit: ${{ steps.echo_info.outputs.commit_sha }}"
+            echo "- Commit Message: ${{ steps.echo_info.outputs.commit_msg }}"
+            echo ""
+            echo "Source:"
+            echo "- Workflow Run: https://github.com/brahmkshatriya/echo/actions/runs/${{ steps.get_run.outputs.run_id }}"
+            echo "- Artifact ID: ${{ steps.get_artifacts.outputs.artifact_id }}"
+          } > VERSION_INFO.txt
+      
+      - name: Create Release
+        if: steps.download.outputs.download_success == 'true' && steps.check_existing.outputs.exists != 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.apk_info.outputs.release_tag }}
+          name: ${{ steps.apk_info.outputs.release_name }}
+          body: |
+            ## 📦 Echo APK - Version ${{ steps.apk_info.outputs.version_name }}
+            
+            > **Note**: This repository is not affiliated with the official Echo project.
+            
+            ### 📱 APK Information
+            - **Version Name:** `${{ steps.apk_info.outputs.version_name }}`
+            - **Version Code:** `${{ steps.apk_info.outputs.version_code }}`
+            - **Package Name:** `${{ steps.apk_info.outputs.package_name }}`
+            - **Size:** ${{ steps.checksums.outputs.apk_size_mb }} MB
+            
+            ### 📋 Android Requirements
+            - **Minimum SDK:** API ${{ steps.apk_info.outputs.min_sdk }}
+            - **Target SDK:** API ${{ steps.apk_info.outputs.target_sdk }}
+            
+            ### 🔐 Checksums
+            ```
+            MD5:    ${{ steps.checksums.outputs.md5_hash }}
+            SHA256: ${{ steps.checksums.outputs.sha256_hash }}
+            ```
+            
+            ### 📝 Latest Echo Commit
+            - **Commit:** [`${{ steps.echo_info.outputs.commit_sha }}`](https://github.com/brahmkshatriya/echo/commit/${{ steps.echo_info.outputs.commit_sha }})
+            - **Message:** ${{ steps.echo_info.outputs.commit_msg }}
+            - **Date:** ${{ steps.echo_info.outputs.commit_date }}
+            
+            ### 🔗 Links
+            - 🌟 [Echo Repository](https://github.com/brahmkshatriya/echo) (${{ steps.echo_info.outputs.echo_stars }} stars)
+            - 🔧 [Source Workflow Run](https://github.com/brahmkshatriya/echo/actions/runs/${{ steps.get_run.outputs.run_id }})
+            - 📦 [Official Releases](https://github.com/brahmkshatriya/echo/releases)
+            
+            ### 📄 Files
+            - `echo-${{ steps.apk_info.outputs.version_name }}.apk` - Main APK file
+            - `echo-latest.apk` - Always points to the latest version
+            - `VERSION_INFO.txt` - Detailed version information
+            
+            ---
+            
+            **Description:** ${{ steps.echo_info.outputs.echo_desc }}
+            
+            **Build Date:** ${{ steps.get_run.outputs.run_date }}
+          draft: false
+          prerelease: false
+          files: |
+            echo-${{ steps.apk_info.outputs.version_name }}.apk
+            echo-latest.apk
+            VERSION_INFO.txt
+      
+      - name: Success summary
+        if: steps.download.outputs.download_success == 'true' && steps.check_existing.outputs.exists != 'true'
+        run: |
+          echo "## ✅ Release Created Successfully" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📱 APK Information" >> $GITHUB_STEP_SUMMARY
+          echo "- **Version:** ${{ steps.apk_info.outputs.version_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Version Code:** ${{ steps.apk_info.outputs.version_code }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Size:** ${{ steps.checksums.outputs.apk_size_mb }} MB" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🔗 Links" >> $GITHUB_STEP_SUMMARY
+          echo "- [View Release](https://github.com/${{ github.repository }}/releases/tag/${{ steps.apk_info.outputs.release_tag }})" >> $GITHUB_STEP_SUMMARY
+          echo "- [Source Workflow](https://github.com/brahmkshatriya/echo/actions/runs/${{ steps.get_run.outputs.run_id }})" >> $GITHUB_STEP_SUMMARY
+      
+      - name: Version exists summary
+        if: steps.download.outputs.download_success == 'true' && steps.check_existing.outputs.exists == 'true'
+        run: |
+          echo "## ⏭️ Version Already Exists" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Release ${{ steps.apk_info.outputs.release_tag }} already exists. No new release created." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "📦 [View existing release](https://github.com/${{ github.repository }}/releases/tag/${{ steps.apk_info.outputs.release_tag }})" >> $GITHUB_STEP_SUMMARY
